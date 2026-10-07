@@ -166,6 +166,58 @@ describe('retry helpers', () => {
     );
   });
 
+  it('rejects invalid attempts, factor and jitter with a message naming the option', () => {
+    // NaN is what Number(process.env.X) gives for an unset variable; `??` keeps it
+    expect(() => resolveRetry({ attempts: NaN })).toThrow(
+      'HttpClient `retry.attempts`: Invalid value NaN. Use a non-negative integer or Infinity.',
+    );
+    for (const attempts of [-1, 2.5]) {
+      expect(() => resolve(attempts), String(attempts)).toThrow(
+        'HttpClient `retry.attempts`',
+      );
+    }
+    expect(() => resolveRetry({ backoff: { factor: NaN } })).toThrow(
+      'HttpClient `retry.backoff.factor`: Invalid value NaN. Use a number of 0 or more.',
+    );
+    expect(() => resolve({ backoff: { factor: -1 } })).toThrow(
+      'HttpClient `retry.backoff.factor`',
+    );
+    expect(() =>
+      resolveRetry({ backoff: { jitter: 'Full' as 'full' } }),
+    ).toThrow(
+      'HttpClient `retry.backoff.jitter`: Invalid value "Full". Use "full", "equal" or "none".',
+    );
+    expect(() => resolveRetry({ backoff: { jitter: {} as 'full' } })).toThrow(
+      'HttpClient `retry.backoff.jitter`: Invalid value {}.',
+    );
+    // Infinity attempts retry until the caller stops them
+    expect(resolve(Infinity)?.attempts).toBe(Infinity);
+    // A factor of 0 or below 1 shrinks the wait; that is valid
+    const waits = (factor: number) =>
+      [1, 2, 3].map((n) =>
+        backoffDelay(
+          resolveRetry({ backoff: { delay: 400, factor, jitter: 'none' } })!,
+          n,
+          undefined,
+        ),
+      );
+    expect(waits(0)).toEqual([400, 0, 0]);
+    expect(waits(0.5)).toEqual([400, 200, 100]);
+    // factor ** n overflows to Infinity: delay 0 still waits 0, not NaN
+    expect(
+      [1, 2, 3, 4].map((n) =>
+        backoffDelay(
+          resolveRetry({
+            backoff: { delay: 0, factor: 1e200, jitter: 'none' },
+          })!,
+          n,
+          undefined,
+        ),
+      ),
+    ).toEqual([0, 0, 0, 0]);
+    expect(waits(Infinity)).toEqual([400, 30_000, 30_000]);
+  });
+
   it('treats stream bodies as not replayable', () => {
     expect(isReplayableBody('x')).toBe(true);
     expect(isReplayableBody(new URLSearchParams('a=1'))).toBe(true);

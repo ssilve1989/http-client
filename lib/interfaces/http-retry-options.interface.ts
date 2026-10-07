@@ -3,7 +3,7 @@ import type { Duration } from '../types/duration.type.js';
 export interface HttpBackoffOptions {
   /** Wait before the first retry. Default 200 ms. */
   delay?: Duration;
-  /** Growth per retry; `1` = constant. Default 2. */
+  /** Growth per retry, a number ≥ 0; `1` = constant. Default 2. */
   factor?: number;
   /**
    * Cap for a single wait. A `Retry-After` asking for longer is not waited
@@ -20,7 +20,10 @@ export interface HttpBackoffOptions {
  * Every field replaces its default; unset fields keep it.
  */
 export interface HttpRetryOptions {
-  /** Total attempts, including the first. Default 3. */
+  /**
+   * Total attempts, including the first. Default 3. `Infinity` retries until
+   * the caller stops it. `0` is read as `1`: no retries.
+   */
   attempts?: number;
   /**
    * Wait between attempts. A function gets the attempt that just failed

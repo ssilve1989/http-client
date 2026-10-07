@@ -458,6 +458,25 @@ describe('HttpClient', () => {
       expect(server.requests).toHaveLength(4);
     });
 
+    it('rejects invalid retry numbers when the client is created, and per request before sending', async () => {
+      const unset = NaN; // Number(process.env.X) for an unset variable
+      expect(() => new HttpClient({ retry: unset })).toThrow(
+        'HttpClient `retry.attempts`: Invalid value NaN',
+      );
+      expect(
+        () => new HttpClient({ retry: { backoff: { factor: unset } } }),
+      ).toThrow('HttpClient `retry.backoff.factor`: Invalid value NaN');
+
+      const client = new HttpClient({ baseUrl: server.url });
+      await expect(
+        client.get('/flaky', { retry: { attempts: unset } }),
+      ).rejects.toThrow('HttpClient `retry.attempts`');
+      await expect(
+        client.get('/flaky', { retry: { backoff: { factor: -2 } } }),
+      ).rejects.toThrow('HttpClient `retry.backoff.factor`');
+      expect(server.requests).toHaveLength(0);
+    });
+
     it('stops retrying when the user aborts during the backoff', async () => {
       failures.flaky = 10;
       const client = new HttpClient({

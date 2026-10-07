@@ -99,6 +99,8 @@ const DEFAULT_BACKOFF: ResolvedBackoff = {
   jitter: 'full',
 };
 
+const JITTERS: readonly ResolvedBackoff['jitter'][] = ['full', 'equal', 'none'];
+
 export const DEFAULT_RETRY = {
   attempts: 3,
   methods: ['GET', 'HEAD', 'OPTIONS', 'PUT', 'DELETE'],
@@ -136,8 +138,8 @@ function mergeBackoff(
 
 /**
  * Applies the defaults. `undefined` means a single attempt. Throws a
- * `TypeError` naming the option for an invalid duration, so a bad client
- * config fails when the client is created.
+ * `TypeError` naming the option for an invalid value, so a bad client config
+ * fails when the client is created.
  */
 export function resolveRetry(input: RetryInput): ResolvedRetry | undefined {
   if (input === false) return undefined;
@@ -148,7 +150,14 @@ export function resolveRetry(input: RetryInput): ResolvedRetry | undefined {
       ? options.backoff
       : resolveBackoff(options.backoff);
   const attempts = options.attempts ?? DEFAULT_RETRY.attempts;
-  if (!(attempts > 1)) return undefined;
+  if (attempts !== Infinity && !(Number.isInteger(attempts) && attempts >= 0)) {
+    invalidOption(
+      'retry.attempts',
+      attempts,
+      'a non-negative integer or Infinity',
+    );
+  }
+  if (attempts <= 1) return undefined;
   return {
     attempts,
     methods: (options.methods ?? DEFAULT_RETRY.methods).map((method) =>
@@ -165,18 +174,41 @@ export function resolveRetry(input: RetryInput): ResolvedRetry | undefined {
 }
 
 function resolveBackoff(options: HttpBackoffOptions = {}): ResolvedBackoff {
+  const factor = options.factor ?? DEFAULT_BACKOFF.factor;
+  const jitter = options.jitter ?? DEFAULT_BACKOFF.jitter;
+  if (!(factor >= 0)) {
+    invalidOption('retry.backoff.factor', factor, 'a number of 0 or more');
+  }
+  if (!JITTERS.includes(jitter)) {
+    invalidOption('retry.backoff.jitter', jitter, '"full", "equal" or "none"');
+  }
   return {
     delay:
       options.delay === undefined
         ? DEFAULT_BACKOFF.delay
         : durationOption(options.delay, 'retry.backoff.delay'),
-    factor: options.factor ?? DEFAULT_BACKOFF.factor,
+    factor,
     maxDelay:
       options.maxDelay === undefined
         ? DEFAULT_BACKOFF.maxDelay
         : durationOption(options.maxDelay, 'retry.backoff.maxDelay'),
-    jitter: options.jitter ?? DEFAULT_BACKOFF.jitter,
+    jitter,
   };
+}
+
+/** Throws like `durationOption()`: "HttpClient `retry.attempts`: Invalid value NaN. …". */
+function invalidOption(
+  option: string,
+  value: unknown,
+  expected: string,
+): never {
+  const shown =
+    typeof value === 'number'
+      ? String(value)
+      : (JSON.stringify(value) ?? String(value));
+  throw new TypeError(
+    `HttpClient \`${option}\`: Invalid value ${shown}. Use ${expected}.`,
+  );
 }
 
 /**
@@ -194,7 +226,9 @@ export function backoffDelay(
     return durationOption(retry.backoff(attempt, error), 'retry.backoff()');
   }
   const { delay, factor, maxDelay, jitter } = retry.backoff;
-  const ceiling = Math.min(maxDelay, delay * factor ** (attempt - 1));
+  // With delay 0, factor ** n can overflow to Infinity, and 0 * Infinity is NaN
+  const ceiling =
+    delay === 0 ? 0 : Math.min(maxDelay, delay * factor ** (attempt - 1));
   switch (jitter) {
     case 'none':
       return Math.floor(ceiling);
